@@ -250,7 +250,7 @@ if uploaded_file and search_text:
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                st.image(result['frame'], use_column_width=True)
+                st.image(result['frame'], width=None)
             
             with col2:
                 st.markdown(f"### #{idx} 结果")
