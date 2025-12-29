@@ -1,6 +1,5 @@
 import streamlit as st
 import torch
-import cv2
 import numpy as np
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
@@ -9,6 +8,12 @@ import os
 from datetime import datetime
 import base64
 from io import BytesIO
+import subprocess
+import shutil
+
+# 检查ffmpeg是否可用
+if shutil.which("ffmpeg") is None:
+    st.error("⚠️ 系统未安装ffmpeg，某些功能可能不可用")
 
 # ================= 页面配置 =================
 st.set_page_config(
@@ -56,44 +61,72 @@ def load_model():
 
 # ================= 视频处理函数 =================
 def extract_frames(video_file, interval=1):
-    """从视频文件中提取帧"""
+    """从视频文件中提取帧（使用ffmpeg）"""
     # 保存上传的文件到临时位置
     with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
         tmp_file.write(video_file.read())
         tmp_path = tmp_file.name
     
+    # 创建临时输出目录
+    output_dir = tempfile.mkdtemp()
+    
     try:
-        cap = cv2.VideoCapture(tmp_path)
+        # 使用ffmpeg提取帧
+        # fps=1/interval 表示每隔interval秒提取一帧
+        cmd = [
+            'ffmpeg',
+            '-i', tmp_path,
+            '-vf', f'fps=1/{interval}',
+            '-q:v', '2',
+            os.path.join(output_dir, 'frame_%04d.jpg'),
+            '-loglevel', 'error'
+        ]
         
-        if not cap.isOpened():
-            st.error("❌ 无法打开视频文件，请检查格式")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            st.error(f"❌ 视频处理失败: {result.stderr}")
             return None, None
         
-        fps = cap.get(cv2.CAP_PROP_FPS)
+        # 读取提取的帧
         frames = []
         timestamps = []
+        frame_files = sorted([f for f in os.listdir(output_dir) if f.endswith('.jpg')])
         
-        frame_count = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # 按间隔提取帧
-            if frame_count % (int(fps) * interval) == 0:
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(Image.fromarray(frame_rgb))
-                timestamps.append(frame_count / fps)
-            
-            frame_count += 1
+        for idx, frame_file in enumerate(frame_files):
+            frame_path = os.path.join(output_dir, frame_file)
+            try:
+                img = Image.open(frame_path)
+                frames.append(img)
+                timestamps.append(idx * interval)
+            except Exception as e:
+                st.warning(f"⚠️ 无法读取帧 {frame_file}")
+                continue
         
-        cap.release()
+        if not frames:
+            st.error("❌ 无法从视频中提取任何帧")
+            return None, None
+        
         return frames, timestamps
+    
+    except FileNotFoundError:
+        st.error("❌ ffmpeg 未安装。请安装 ffmpeg 或使用云端部署版本。")
+        return None, None
+    
+    except Exception as e:
+        st.error(f"❌ 处理视频时出错: {str(e)}")
+        return None, None
     
     finally:
         # 清理临时文件
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            if os.path.exists(output_dir):
+                import shutil
+                shutil.rmtree(output_dir)
+        except:
+            pass
 
 def search_frames(model, processor, search_text, frames, timestamps, device):
     """搜索最匹配的帧"""
