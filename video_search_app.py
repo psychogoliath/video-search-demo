@@ -140,11 +140,18 @@ def search_frames(model, processor, search_text, frames, timestamps, device):
     with torch.no_grad():
         outputs = model(**inputs)
     
-    logits_per_image = outputs.logits_per_image
-    probs = logits_per_image.softmax(dim=0)
+    # logits_per_image shape: [num_images, 1]
+    logits_per_image = outputs.logits_per_image.squeeze(-1)  # 移除最后一维，得到[num_images]
+    probs = torch.nn.functional.softmax(logits_per_image, dim=0)  # 沿着图像维度进行softmax
     
     # 获取Top-5结果
-    top5_probs, top5_indices = torch.topk(probs.squeeze(), k=min(5, len(frames)))
+    k = min(5, len(frames))
+    if k == 1:
+        # 如果只有1张图，直接返回
+        top5_probs = probs.unsqueeze(0)
+        top5_indices = torch.tensor([0]).to(device)
+    else:
+        top5_probs, top5_indices = torch.topk(probs, k=k)
     
     results = []
     for prob, idx in zip(top5_probs, top5_indices):
@@ -424,5 +431,3 @@ st.markdown("""
     <p>可部署到 Streamlit Cloud / Hugging Face Spaces / 云服务器</p>
 </div>
 """, unsafe_allow_html=True)
-
-
