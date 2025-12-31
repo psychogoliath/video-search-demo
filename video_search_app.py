@@ -53,11 +53,40 @@ st.markdown("""
 # ================= 模型加载 (缓存) =================
 @st.cache_resource
 def load_model():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    with st.spinner("🔄 正在加载CLIP模型... (初次加载需要几分钟)"):
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        st.info(f"📱 正在使用 {device.upper()} 设备加载模型...")
+        
+        # 加载处理器
+        st.info("加载处理器 (Processor)...")
         processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-    return model, processor, device
+        st.success("✓ 处理器加载成功")
+        
+        # 加载模型
+        st.info("加载CLIP模型... (首次加载需要几分钟)")
+        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        st.success("✓ 模型加载成功")
+        
+        # 移至设备
+        st.info(f"将模型移至 {device.upper()}...")
+        model = model.to(device)
+        st.success(f"✓ 模型已移至 {device.upper()}")
+        
+        # 验证模型
+        st.info("验证模型...")
+        if hasattr(model, 'vision_model') and hasattr(model, 'text_model'):
+            st.success("✓ 模型结构正确")
+        else:
+            st.warning("⚠️ 模型结构不标准")
+        
+        return model, processor, device
+    
+    except Exception as e:
+        st.error(f"❌ 模型加载失败: {str(e)}")
+        st.error(f"详细错误信息:\n{str(e)}")
+        import traceback
+        st.error(f"追踪:\n{traceback.format_exc()}")
+        return None, None, None
 
 # ================= 视频处理函数 =================
 def extract_frames(video_file, interval=1):
@@ -130,38 +159,108 @@ def extract_frames(video_file, interval=1):
 
 def search_frames(model, processor, search_text, frames, timestamps, device):
     """搜索最匹配的帧"""
-    inputs = processor(
-        text=[search_text],
-        images=frames,
-        return_tensors="pt",
-        padding=True
-    ).to(device)
+    try:
+        # 验证输入
+        if not frames or len(frames) == 0:
+            st.error("❌ 没有提取到任何帧")
+            return []
+        
+        if not search_text or search_text.strip() == "":
+            st.error("❌ 搜索词不能为空")
+            return []
+        
+        # 处理输入
+        try:
+            inputs = processor(
+                text=[search_text],
+                images=frames,
+                return_tensors="pt",
+                padding=True
+            )
+        except Exception as e:
+            st.error(f"❌ 处理器错误: {str(e)}")
+            return []
+        
+        # 移至设备
+        try:
+            inputs = inputs.to(device)
+        except Exception as e:
+            st.error(f"❌ 设备转移失败: {str(e)}")
+            return []
+        
+        # 推理
+        try:
+            with torch.no_grad():
+                outputs = model(**inputs)
+        except Exception as e:
+            st.error(f"❌ 模型推理失败: {str(e)}")
+            return []
+        
+        # 检查输出
+        if outputs is None or outputs.logits_per_image is None:
+            st.error("❌ 模型没有返回有效的输出")
+            return []
+        
+        # logits_per_image shape: [num_images, 1]
+        logits_per_image = outputs.logits_per_image
+        
+        # 调试信息
+        st.info(f"📊 Debug: logits_per_image 形状 = {logits_per_image.shape}, 值 = {logits_per_image.squeeze().tolist()[:3]}...")
+        
+        # 检查是否所有logits都相等
+        unique_logits = torch.unique(logits_per_image)
+        if len(unique_logits) == 1:
+            st.warning("⚠️ 警告: 所有logits相等，模型可能未正确学习")
+        
+        # 挤压维度
+        try:
+            logits_per_image = logits_per_image.squeeze(-1)  # [num_images, 1] → [num_images]
+        except Exception as e:
+            st.error(f"❌ squeeze失败: {str(e)}")
+            return []
+        
+        # 应用softmax
+        try:
+            import torch.nn.functional as F
+            probs = F.softmax(logits_per_image, dim=0)
+        except Exception as e:
+            st.error(f"❌ softmax失败: {str(e)}")
+            return []
+        
+        # 验证概率
+        prob_sum = probs.sum().item()
+        if abs(prob_sum - 1.0) > 0.01:
+            st.warning(f"⚠️ 概率和 = {prob_sum:.4f}（应该≈1.0）")
+        
+        # 获取Top-5结果
+        k = min(5, len(frames))
+        if k == 1:
+            # 如果只有1张图，直接返回
+            top5_probs = probs.unsqueeze(0)
+            top5_indices = torch.tensor([0]).to(device)
+        else:
+            try:
+                top5_probs, top5_indices = torch.topk(probs, k=k)
+            except Exception as e:
+                st.error(f"❌ topk失败: {str(e)}")
+                return []
+        
+        # 构建结果
+        results = []
+        for prob, idx in zip(top5_probs, top5_indices):
+            results.append({
+                'frame': frames[idx.item()],
+                'timestamp': timestamps[idx.item()],
+                'score': prob.item()
+            })
+        
+        return results
     
-    with torch.no_grad():
-        outputs = model(**inputs)
-    
-    # logits_per_image shape: [num_images, 1]
-    logits_per_image = outputs.logits_per_image.squeeze(-1)  # 移除最后一维，得到[num_images]
-    probs = torch.nn.functional.softmax(logits_per_image, dim=0)  # 沿着图像维度进行softmax
-    
-    # 获取Top-5结果
-    k = min(5, len(frames))
-    if k == 1:
-        # 如果只有1张图，直接返回
-        top5_probs = probs.unsqueeze(0)
-        top5_indices = torch.tensor([0]).to(device)
-    else:
-        top5_probs, top5_indices = torch.topk(probs, k=k)
-    
-    results = []
-    for prob, idx in zip(top5_probs, top5_indices):
-        results.append({
-            'frame': frames[idx.item()],
-            'timestamp': timestamps[idx.item()],
-            'score': prob.item()
-        })
-    
-    return results
+    except Exception as e:
+        st.error(f"❌ 搜索函数出错: {str(e)}")
+        import traceback
+        st.error(f"详细错误:\n{traceback.format_exc()}")
+        return []
 
 def format_time(seconds):
     """格式化时间"""
@@ -176,7 +275,30 @@ st.markdown("### 上传视频，用自然语言描述找到你想要的片段")
 
 # 加载模型
 model, processor, device = load_model()
+
+# 检查模型是否成功加载
+if model is None or processor is None:
+    st.error("❌ 模型加载失败，应用无法继续")
+    st.stop()
+
 st.success(f"✅ 模型已加载 (运行在 {device.upper()})")
+
+# 快速验证模型
+try:
+    st.info("🔍 验证模型可用性...")
+    from PIL import Image
+    test_img = Image.new('RGB', (224, 224), (100, 100, 100))
+    test_inputs = processor(text=["test"], images=[test_img], return_tensors="pt", padding=True).to(device)
+    with torch.no_grad():
+        test_outputs = model(**test_inputs)
+    if test_outputs and test_outputs.logits_per_image is not None:
+        st.success("✓ 模型验证通过")
+    else:
+        st.error("❌ 模型验证失败：输出无效")
+        st.stop()
+except Exception as e:
+    st.error(f"❌ 模型验证失败: {str(e)}")
+    st.stop()
 
 # 侧边栏设置
 with st.sidebar:
