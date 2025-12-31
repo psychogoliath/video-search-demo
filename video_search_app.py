@@ -250,7 +250,7 @@ if uploaded_file and search_text:
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                st.image(result['frame'], width='None')
+                st.image(result['frame'], use_container_width=True)
             
             with col2:
                 st.markdown(f"### #{idx} 结果")
@@ -424,4 +424,5 @@ st.markdown("""
     <p>可部署到 Streamlit Cloud / Hugging Face Spaces / 云服务器</p>
 </div>
 """, unsafe_allow_html=True)
+
 
