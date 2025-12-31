@@ -2,7 +2,6 @@ import streamlit as st
 import torch
 import numpy as np
 from PIL import Image
-from transformers import CLIPProcessor, CLIPModel
 import tempfile
 import os
 from datetime import datetime
@@ -10,6 +9,17 @@ import base64
 from io import BytesIO
 import subprocess
 import shutil
+
+# 安全导入 CLIP 模型
+try:
+    from transformers import CLIPProcessor, CLIPModel
+except ImportError:
+    try:
+        # 备选：直接导入处理器
+        from transformers.models.clip import CLIPProcessor, CLIPModel
+    except ImportError:
+        st.error("❌ 无法导入 CLIP 模型。请运行: pip install --upgrade transformers")
+        st.stop()
 
 # 检查ffmpeg是否可用
 if shutil.which("ffmpeg") is None:
@@ -57,14 +67,36 @@ def load_model():
         device = "cuda" if torch.cuda.is_available() else "cpu"
         st.info(f"📱 正在使用 {device.upper()} 设备加载模型...")
         
-        # 加载处理器
+        # 加载处理器 - 带重试和备选方案
         st.info("加载处理器 (Processor)...")
-        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        try:
+            processor = CLIPProcessor.from_pretrained(
+                "openai/clip-vit-base-patch32",
+                trust_remote_code=True,
+                timeout=30
+            )
+        except Exception as e:
+            st.warning(f"⚠️ 处理器加载失败，尝试备选方案: {str(e)}")
+            # 备选：使用自动模型类
+            from transformers import AutoProcessor
+            processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        
         st.success("✓ 处理器加载成功")
         
-        # 加载模型
+        # 加载模型 - 带重试和备选方案
         st.info("加载CLIP模型... (首次加载需要几分钟)")
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        try:
+            model = CLIPModel.from_pretrained(
+                "openai/clip-vit-base-patch32",
+                trust_remote_code=True,
+                timeout=30
+            )
+        except Exception as e:
+            st.warning(f"⚠️ 模型加载失败，尝试备选方案: {str(e)}")
+            # 备选：使用自动模型类
+            from transformers import AutoModel
+            model = AutoModel.from_pretrained("openai/clip-vit-base-patch32")
+        
         st.success("✓ 模型加载成功")
         
         # 移至设备

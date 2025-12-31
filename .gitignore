@@ -1,0 +1,52 @@
+# 排除不必要的文件和目录
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 临时文件
+*.tmp
+*.bak
+*.log
+
+# Streamlit
+.streamlit/cache/
+.streamlit/secrets.toml
+.streamlit/.env
+
+# 生成的文件
+*.html
+*.png
+*.jpg
+*.jpeg
+
+# 项目特定
+/temp/
+/temp_files/
+/cache/
+/downloads/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# 演示文件（可选，根据需要保留）
+*.pptx
+CLIP-group12.pptx
+Pt.3.pptx

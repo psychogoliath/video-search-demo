@@ -1,0 +1,31 @@
+"""
+Streamlit 云部署专用配置文件
+.streamlit/config.toml
+"""
+
+[logger]
+level = "info"
+
+[client]
+showErrorDetails = true
+toolbarMode = "developer"
+
+[theme]
+primaryColor = "#667eea"
+backgroundColor = "#f5f7f9"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#2c3e50"
+font = "sans serif"
+
+# 增加超时时间，因为首次加载模型需要时间
+[client]
+maxUploadSize = 200
+
+# 增加脚本运行超时
+[runner]
+magicEnabled = true
+fastReruns = true
+
+# 禁用警告
+[logger]
+level = "warning"
